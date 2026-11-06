@@ -111,7 +111,7 @@ jobs:
         if: steps.want.outputs.build == 'yes'
         run: |
           sudo apt-get update -qq
-          # qemu-user-static + binfmt-support: two jobs at once. pmbootstrap
+          # qemu-user + qemu-user-binfmt: two jobs at once. pmbootstrap
           #   builds the device package inside an armhf chroot and there is no
           #   gcc-armhf cross compiler in pmaports any more, so the build runs
           #   under emulation; and T2/T3 run the finished image's own armhf
@@ -147,7 +147,7 @@ jobs:
           # and qemu-utils (made that qcow2). Nothing invokes any of them now;
           # the chroot tests use an overlayfs over a read-only loop device.
           sudo apt-get install -y --no-install-recommends \
-            qemu-user-static binfmt-support \
+            qemu-user qemu-user-binfmt \
             qemu-system-arm mtools kpartx \
             xz-utils util-linux openssl git python3
           qemu-system-arm --version | head -1
@@ -172,11 +172,12 @@ jobs:
           entry=/proc/sys/fs/binfmt_misc/qemu-arm
           enabled() { [ -e "$entry" ] && grep -qx enabled "$entry"; }
 
-          # Debian/Ubuntu already ship the definition in /var/lib/binfmts and
-          # only need it imported into the kernel's table.
-          enabled || sudo update-binfmts --import qemu-arm || true
+          # qemu-user-binfmt ships the definition in /usr/lib/binfmt.d.
+          # systemd-binfmt needs the ABSOLUTE path, and exits 0 even when it
+          # fails, so enabled() below is the real check.
+          enabled || sudo /usr/lib/systemd/systemd-binfmt /usr/lib/binfmt.d/qemu-arm.conf || true
           # The donor project's pattern, and the one that still works where
-          # /var/lib/binfmts does not exist at all.
+          # /usr/lib/binfmt.d has no qemu-arm.conf at all.
           enabled || docker run --privileged --rm tonistiigi/binfmt --install arm || true
 
           if ! enabled; then
@@ -188,7 +189,7 @@ jobs:
           # The handler is only half of it: the interpreter it names has to
           # work too, and a broken qemu-user is otherwise indistinguishable
           # from a broken image.
-          qemu-arm-static --version | head -1
+          qemu-arm --version | head -1
 
       # The image's filename is not spelled out anywhere below: the device name
       # in it comes from config/alpinepi.env, which is the single source of
@@ -261,11 +262,12 @@ jobs:
           entry=/proc/sys/fs/binfmt_misc/qemu-arm
           enabled() { [ -e "$entry" ] && grep -qx enabled "$entry"; }
 
-          # Debian/Ubuntu already ship the definition in /var/lib/binfmts and
-          # only need it imported into the kernel's table.
-          enabled || sudo update-binfmts --import qemu-arm || true
+          # qemu-user-binfmt ships the definition in /usr/lib/binfmt.d.
+          # systemd-binfmt needs the ABSOLUTE path, and exits 0 even when it
+          # fails, so enabled() below is the real check.
+          enabled || sudo /usr/lib/systemd/systemd-binfmt /usr/lib/binfmt.d/qemu-arm.conf || true
           # The donor project's pattern, and the one that still works where
-          # /var/lib/binfmts does not exist at all.
+          # /usr/lib/binfmt.d has no qemu-arm.conf at all.
           enabled || docker run --privileged --rm tonistiigi/binfmt --install arm || true
 
           if ! enabled; then
@@ -277,7 +279,7 @@ jobs:
           # The handler is only half of it: the interpreter it names has to
           # work too, and a broken qemu-user is otherwise indistinguishable
           # from a broken image.
-          qemu-arm-static --version | head -1
+          qemu-arm --version | head -1
 
       # The image's filename is not spelled out anywhere below: the device name
       # in it comes from config/alpinepi.env, which is the single source of

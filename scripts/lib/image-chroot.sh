@@ -12,7 +12,7 @@
 #   full-system TCG   qemu-system-arm emulates a whole machine - CPU, SD
 #                     controller, interrupt controller - and then boots a
 #                     kernel. Minutes per test.
-#   user-mode qemu    qemu-arm-static plus binfmt_misc translates userspace
+#   user-mode qemu    qemu-arm plus binfmt_misc translates userspace
 #                     instructions only, inside a chroot. No kernel, no device
 #                     emulation. Seconds per test.
 #
@@ -141,7 +141,7 @@ ic_need_tools() {
 		command -v "$tool" >/dev/null 2>&1 || missing+=("$tool")
 	done
 	[ "${#missing[@]}" -eq 0 ] ||
-		ic_die "missing host tools: ${missing[*]}. Install: qemu-user-static binfmt-support util-linux e2fsprogs coreutils python3"
+		ic_die "missing host tools: ${missing[*]}. Install: qemu-user qemu-user-binfmt util-linux e2fsprogs coreutils python3"
 }
 
 # --------------------------------------------------------------------------- #
@@ -166,25 +166,15 @@ ic_binfmt() {
 
 	if ! { [ -e "$entry" ] && grep -qx enabled "$entry"; }; then
 		echo "[ic] binfmt_misc has no enabled qemu-arm handler; registering it"
-		# Debian/Ubuntu path first: qemu-user-static ships the definition in
-		# /var/lib/binfmts and update-binfmts only has to import it.
-		if command -v update-binfmts >/dev/null 2>&1 &&
-				[ -f /var/lib/binfmts/qemu-arm ]; then
-			update-binfmts --import qemu-arm >/dev/null 2>&1 || true
-
-			# --import above is a no-op when update-binfmts still believes the
-			# handler is imported, and that is the normal case here rather
-			# than an edge case: "pmbootstrap shutdown" - which runs at the end
-			# of every build - unregisters the handler by writing -1 straight
-			# to the kernel entry, which never touches update-binfmts' own
-			# state in /var/lib/binfmts. The kernel then has no handler while
-			# update-binfmts insists there is one, so the image's armhf
-			# binaries stop being executable between the build and the tests.
-			# Forget it first, then import, so the state and the kernel agree.
-			if ! { [ -e "$entry" ] && grep -qx enabled "$entry"; }; then
-				update-binfmts --unimport qemu-arm >/dev/null 2>&1 || true
-				update-binfmts --import qemu-arm >/dev/null 2>&1 || true
-			fi
+		# Ubuntu 26.04: qemu-user-binfmt ships the definition in
+		# /usr/lib/binfmt.d. "pmbootstrap shutdown" - which runs at the end of
+		# every build - unregisters the handler by writing -1 to the kernel
+		# entry, so this re-registration is the normal case, not an edge case.
+		# systemd-binfmt exits 0 even when it fails; the enabled check below
+		# is what counts.
+		if [ -x /usr/lib/systemd/systemd-binfmt ] &&
+				[ -e /usr/lib/binfmt.d/qemu-arm.conf ]; then
+			/usr/lib/systemd/systemd-binfmt /usr/lib/binfmt.d/qemu-arm.conf >/dev/null 2>&1 || true
 		fi
 		# Container fallback, the pattern taken from the donor project's
 		# scripts/chroot-test.sh. "--reset -p yes" clears stale entries (a
@@ -208,14 +198,14 @@ ic_binfmt() {
 			       armhf binaries cannot be executed in a chroot and this test
 			       cannot run at all. Register it with ONE of:
 
-			         sudo update-binfmts --import qemu-arm
-			         sudo apt-get install -y qemu-user-static binfmt-support
+			         sudo /usr/lib/systemd/systemd-binfmt /usr/lib/binfmt.d/qemu-arm.conf
+			         sudo apt-get install -y qemu-user qemu-user-binfmt
 			         docker run --privileged --rm tonistiigi/binfmt --install arm
 			         podman run --privileged --rm \
 			             docker.io/multiarch/qemu-user-static --reset -p yes
 
-			       The first works when qemu-user-static is already installed
-			       but its handler was never imported, which is the usual case.
+			       The first works when qemu-user-binfmt is installed but the
+			       handler was removed, which is the usual case after a build.
 		MSG
 		exit 3
 	fi
@@ -227,7 +217,7 @@ ic_binfmt() {
 
 	# The "F" (fix binary) flag makes the kernel open the emulator at
 	# REGISTRATION time and reuse that open file for every exec, so it works
-	# inside a chroot that has no copy of qemu-arm-static. Without F the
+	# inside a chroot that has no copy of qemu-arm. Without F the
 	# kernel resolves the interpreter path INSIDE the chroot, so the emulator
 	# has to be copied in - remembered here because the alternative symptom is
 	# a bare "No such file or directory" from a binary that plainly exists.
